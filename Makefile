@@ -4,7 +4,7 @@
 #
 #################################################################################
 
-PROJECT_NAME = data-streaming
+PROJECT_NAME = guardian-news-pipeline
 PYTHON_INTERPRETER = python
 WD=$(shell pwd)
 PYTHONPATH=${WD}
@@ -34,27 +34,12 @@ endef
 
 ## Build the environment requirements
 requirements: create-environment
-	$(call execute_in_env, $(PIP) install -r ./requirements.txt)
-	$(call execute_in_env, $(PIP) install requests boto3 -t dependencies/python)
+	$(call execute_in_env, $(PIP) install -r ./requirements-dev.txt)
+	$(call execute_in_env, $(PIP) install -r ./requirements.txt -t dependencies/python)
 
 ################################################################################################################
-# Set Up
-## Install bandit
-bandit:
-	$(call execute_in_env, $(PIP) install bandit)
 
-## Install black
-black:
-	$(call execute_in_env, $(PIP) install black)
-
-## Install coverage
-coverage:
-	$(call execute_in_env, $(PIP) install coverage)
-
-## Set up dev requirements (bandit, safety, black)
-dev-setup: bandit black coverage
-
-# Build / Run
+# Tests
 
 ## Run the security test (bandit)
 security-test:
@@ -73,6 +58,6 @@ check-coverage:
 	$(call execute_in_env, PYTHONPATH=${PYTHONPATH} pytest --cov=src tests/)
 
 ## Run all checks
-run-checks: security-test run-black unit-test check-coverage
+run-tests: security-test run-black unit-test check-coverage
 
-all: requirements dev-setup run-checks
+all: requirements run-tests
