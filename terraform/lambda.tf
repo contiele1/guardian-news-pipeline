@@ -10,7 +10,7 @@ resource "aws_lambda_function" "lambda" {
   role             = aws_iam_role.lambda_role.arn
   handler          = "main.lambda_handler"
   source_code_hash = filebase64sha256("${path.module}/../src/main.py")
-  runtime          = "python3.9"
+  runtime          = "python3.12"
   layers           = [aws_lambda_layer_version.dependencies.arn]
 }
 
