@@ -35,8 +35,8 @@ endef
 ## Build the environment requirements
 requirements: create-environment
 	$(call execute_in_env, $(PIP) install -r ./requirements-dev.txt)
-	$(call execute_in_env, $(PIP) install -r ./requirements.txt -t dependencies/python)
-
+	rm -rf dependencies/python
+	$(call execute_in_env, $(PIP) install -r ./requirements.txt -t dependencies/python --platform manylinux2014_x86_64 --implementation cp --python-version 3.12 --only-binary=:all:)
 ################################################################################################################
 
 # Tests

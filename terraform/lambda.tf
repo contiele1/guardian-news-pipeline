@@ -5,12 +5,12 @@ data "archive_file" "lambda" {
 }
 
 resource "aws_lambda_function" "lambda" {
-  filename         = "${path.module}/../packages/function.zip"
+  filename         = data.archive_file.lambda.output_path
   function_name    = var.lambda_name
   role             = aws_iam_role.lambda_role.arn
   handler          = "main.lambda_handler"
-  source_code_hash = filebase64sha256("${path.module}/../src/main.py")
-  runtime          = "python3.9"
+  source_code_hash = data.archive_file.lambda.output_base64sha256
+  runtime          = "python3.12"
   layers           = [aws_lambda_layer_version.dependencies.arn]
 }
 
