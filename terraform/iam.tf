@@ -18,7 +18,6 @@ resource "aws_iam_role" "lambda_role" {
 }
 
 
-
 ## POLICY TO SEND TO QUEUE 
 
 data "aws_iam_policy_document" "lambda_sqs_policy" {
@@ -36,4 +35,12 @@ resource "aws_iam_policy" "lambda_sqs" {
 resource "aws_iam_role_policy_attachment" "lambda_sqs_policy_attachment" {
   role       = aws_iam_role.lambda_role.name
   policy_arn = aws_iam_policy.lambda_sqs.arn
+}
+
+
+## POLICY TO WRITE CLOUDWATCH LOGS
+
+resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
