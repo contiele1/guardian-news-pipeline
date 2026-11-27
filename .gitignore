@@ -4,6 +4,7 @@ venv
 **/__pycache__
 **/.terraform/
 terraform.tfstate
+terraform/backend.hcl
 dependencies
 packages
 .coverage
