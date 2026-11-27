@@ -70,6 +70,8 @@ make bootstrap
 
 This applies `terraform/bootstrap/`, which creates an S3 bucket for Terraform state with versioning, encryption and public access blocked. The bootstrap keeps its own state locally, as nothing remote exists yet.
 
+> **Bucket already exists?** On a second machine or in a fresh clone of an account that is already bootstrapped, skip `make bootstrap` (it fails with `BucketAlreadyOwnedByYou`). Instead, create `terraform/backend.hcl` by hand with one line, `bucket = "<your-state-bucket-name>"`, then run `terraform -chdir=terraform init -backend-config=backend.hcl` in place of `make tf-init`.
+
 **2. Initialise the main configuration**
 
 ```bash
@@ -163,7 +165,8 @@ It prompts for a search term, an optional start date (`dd-mm-yyyy`) and a queue 
 - The API key is passed in the event. It will move to SSM Parameter Store so it never travels with the request.
 - Only the first page of results (ten articles) is fetched per run, and there is no record of what was already sent, so repeated runs send duplicates.
 - Some errors are printed rather than raised, so a failed send to SQS can still look like a successful Lambda run.
-- The bootstrap's own state is local. If it is lost, the bucket keeps working and can be brought back under Terraform with an `import` block.
+- The bootstrap's own state is local, so it exists only on the machine that ran `make bootstrap`. If it is lost, the bucket keeps working and can be brought back under Terraform with `terraform import`.
+- Never delete the state bucket by hand: Terraform loses its record of every resource, and anything still deployed has to be removed manually or imported. The bootstrap protects the bucket with `prevent_destroy` and versioning, but neither stops a deletion from the console.
 
 ## Roadmap
 
