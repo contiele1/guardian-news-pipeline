@@ -3,7 +3,9 @@ venv
 .vscode
 **/__pycache__
 **/.terraform/
-terraform.tfstate
+*.tfstate
+*.tfstate.*
+terraform/backend.hcl
 dependencies
 packages
 .coverage

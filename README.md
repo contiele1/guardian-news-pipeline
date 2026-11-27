@@ -1,20 +1,22 @@
-# Streaming Data Project
+# Guardian News Pipeline
 
-## Compatibility
-Tested on Linux and WSL.
+A serverless pipeline on AWS that searches the [Guardian Open Platform API](https://open-platform.theguardian.com/) for articles and publishes them as JSON messages to an SQS queue, ready for downstream consumers. The infrastructure is defined in Terraform, with remote state in a versioned, encrypted S3 bucket.
 
-## Description
-An application to retrieve articles from the [Guardian API](https://open-platform.theguardian.com/) and publish it to an instance of AWS SQS queue so that it can be consumed and analysed by other applications.
+> **Status:** work in progress. The ingestion Lambda and queue work today; scheduling, a data lake in S3 and dbt models are on the [roadmap](#roadmap).
 
-It accepts a key for the Guardian API, a search term (e.g. "machine learning"), an optional "date_from" field, and the name of an SQS queue. It will use the search terms to search for articles in the Guardian API and will then post details of up to ten hits to the SQS.
+## Architecture
 
-For example, given the inputs:
-- "test"
-- "machine learning" 
-- "date_from=2023-01-01"
-- "guardian_content"
+```mermaid
+flowchart LR
+    U[Event<br/>CLI / console / local.py] --> L[Lambda<br/>call_and_send]
+    L -->|search| G[Guardian API]
+    L -->|JSON messages| Q[SQS<br/>guardian_content]
+    L -.->|logs| C[CloudWatch Logs]
+```
 
-it will retrieve all content returned by the API (called with the key "test") and send up to the ten most recent items in JSON format to the SQS named "guardian_content". The messages will have the following format:
+The Lambda takes a search term and an optional start date, calls the Guardian search API, keeps the ten most recent results, and sends each one to the queue as a separate message.
+
+## Message format
 
 ```json
 {
@@ -23,34 +25,154 @@ it will retrieve all content returned by the API (called with the key "test") an
     "webUrl": "https://www.theguardian.com/info/2023/nov/21/who-said-what-using-machine-learning-to-correctly-attribute-quotes"
 }
 ```
-This application is intended to be deployed as a component in a data platform on AWS. However, it can also be invoked from the command line (see below).
-The terraform folder contains the modules to provision the infrastucture on AWS, including a standard SQS called "guardian_content".
+
+## Tech stack
+
+- **Python 3.12**: `requests` for the API, `boto3` for SQS
+- **AWS**: Lambda (with a dependencies layer), SQS, IAM, CloudWatch Logs, S3 for Terraform state
+- **Terraform**: AWS provider `~> 6.0`, S3 backend with native state locking
+- **Quality**: pytest with coverage, black, bandit, all run through `make`
 
 ## Prerequisites
-1. An AWS account.
-2. Terraform (Optional)
 
+- Linux or WSL (Make and Bash are needed)
+- Python 3.12
+- Terraform 1.10 or later
+- An AWS account, with the AWS CLI configured (`aws configure`)
+- A free Guardian API key from the [Open Platform](https://open-platform.theguardian.com/access/)
 
-## Setup
-1. Run `make requirements` to install the modules listed in requirements.txt and create the dependencies for the lambda layer. Alternatively, running `make all` will also run the security checks and the unit tests.
-2. Running Terraform on the modules in the terraform folder will deploy the Lambda and an SQS called 'guardian_content' in your AWS account (the region is set to eu-west-2).
-3. To use the app locally, save your Guardian API key in an `.env` file as: 
-```.env
+## Local development
+
+```bash
+make all
+```
+
+This creates a virtual environment, installs the dev requirements, builds the Lambda layer dependencies into `dependencies/python`, then runs bandit, black and the unit tests with a coverage report. It needs no AWS access.
+
+Other useful targets:
+
+| Command | What it does |
+| --- | --- |
+| `make requirements` | Create the venv and install dependencies only |
+| `make unit-test` | Run the tests without coverage |
+| `make run-black` | Format the code |
+| `make security-test` | Run bandit on `src/` |
+
+## Deployment
+
+Deployment has two Terraform configurations: a small one-off **bootstrap** that creates the state bucket, and the **main** configuration for the pipeline itself.
+
+**1. Create the state bucket (once per AWS account)**
+
+```bash
+make bootstrap
+```
+
+This applies `terraform/bootstrap/`, which creates an S3 bucket for Terraform state with versioning, encryption and public access blocked. The bootstrap keeps its own state locally, as nothing remote exists yet.
+
+**2. Initialise the main configuration**
+
+```bash
+make tf-init
+```
+
+This writes `terraform/backend.hcl` (gitignored) with the bucket name from the bootstrap output, then runs `terraform init` against it. To create the file by hand instead, put one line in it: `bucket = "<your-state-bucket-name>"`.
+
+**3. Build the layer and deploy**
+
+```bash
+make requirements              # builds dependencies/ for the Lambda layer
+terraform -chdir=terraform plan
+terraform -chdir=terraform apply
+```
+
+This deploys, in `eu-west-2`:
+
+- the Lambda `call_and_send`, with a layer for its dependencies
+- the SQS queue `guardian_content`
+- an IAM role allowing the Lambda to send to that queue and write CloudWatch logs
+
+**Tear down:** `terraform -chdir=terraform destroy` removes the pipeline. The state bucket is managed by the bootstrap and protected with `prevent_destroy`, so it stays.
+
+## Usage
+
+### Invoke the deployed Lambda
+
+From the AWS CLI:
+
+```bash
+aws lambda invoke \
+  --function-name call_and_send \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"content": "machine learning", "api_key": "<your-key>", "date": "2025-01-01", "sqs_name": "guardian_content"}' \
+  response.json
+```
+
+Or from the Lambda console, with a test event like this:
+
+```json
+{
+    "content": "machine learning",
+    "api_key": "<your-key>",
+    "date": "2025-01-01",
+    "sqs_name": "guardian_content"
+}
+```
+
+`content`, `api_key` and `sqs_name` are required; `date` (`YYYY-MM-DD`) is optional. Check the results in the SQS console under **Send and receive messages → Poll for messages**.
+
+### Run locally
+
+Save your key in a `.env` file at the repo root:
+
+```
 API-KEY=<your-guardian-key>
 ```
 
-## Usage
-- To invoke the application from the command line:
+Then run:
+
 ```bash
+source venv/bin/activate
 python local.py
 ```
-It will retrieve your api key from the .env file.
-- Once deployed, the lambda can be triggered via the AWS CLI or the AWS console with an event with this format:
-```json
-{
-    "content": "your content",
-    "api_key": "your api key",
-    "date": "your date",
-    "sqs_name": "your sqs name"
-}
+
+It prompts for a search term, an optional start date (`dd-mm-yyyy`) and a queue name, then runs the same handler on your machine. It still sends to a real SQS queue, so your AWS credentials need access to it.
+
+## Project layout
+
 ```
+.
+├── src/main.py              # Lambda handler: call the API, send to SQS
+├── local.py                 # Run the handler from the command line
+├── tests/
+│   ├── test_main.py         # Unit tests (API and SQS mocked)
+│   └── resources/           # Saved API response used by the tests
+├── terraform/
+│   ├── bootstrap/           # One-off: state bucket (local state)
+│   ├── main.tf              # Providers and S3 backend
+│   ├── lambda.tf, layer.tf  # Lambda function and dependencies layer
+│   ├── sqs.tf, iam.tf       # Queue and permissions
+│   └── vars.tf
+├── requirements.txt         # Runtime dependencies
+├── requirements-dev.txt     # Test, lint and security tools
+└── Makefile
+```
+
+## Known limitations
+
+- The API key is passed in the event. It will move to SSM Parameter Store so it never travels with the request.
+- Only the first page of results (ten articles) is fetched per run, and there is no record of what was already sent, so repeated runs send duplicates.
+- Some errors are printed rather than raised, so a failed send to SQS can still look like a successful Lambda run.
+- The bootstrap's own state is local. If it is lost, the bucket keeps working and can be brought back under Terraform with an `import` block.
+
+## Roadmap
+
+- [x] Pinned dependencies, Python 3.12 runtime, Terraform version constraints
+- [x] Bootstrap the state bucket in Terraform
+- [ ] API key in SSM Parameter Store
+- [ ] CI on GitHub Actions (tests, black, bandit, `terraform validate`)
+- [ ] Scheduled runs with EventBridge, pagination, a watermark so only new articles are fetched, retries with backoff
+- [ ] Dead-letter queue and CloudWatch alarms
+- [ ] Consumer Lambda landing messages in S3 as a date-partitioned raw layer
+- [ ] Athena and dbt models: staging, dimensions, facts and a coverage mart
+- [ ] One analysis question answered with a chart
